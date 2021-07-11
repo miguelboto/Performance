@@ -1,0 +1,189 @@
+
+title: "Uso System"
+author: "Miguel Á. Boto"
+date: "22/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library(tidyverse)
+library(broom)
+library(patchwork)
+library(lubridate)
+library(data.table)
+library(caret)
+library(ggridges)
+library(xts)
+library(dygraphs)
+library(readr)
+library(openxlsx)
+library(readxl)
+library(ggthemes)
+library(ggrepel)
+library(RColorBrewer)
+library(rpart)
+library(cvms)
+library(tibble) 
+library(psych)
+library(PerformanceAnalytics)
+library(corrplot)
+theme_set(theme_bw())
+knitr::opts_chunk$set(echo = TRUE)
+
+
+uso_system_fev21 <- read_excel("~/System/Relatórios gerenciais/Analytics/uso_system_fev21.xlsx")
+
+bases <- read_excel("~/System/Relatórios gerenciais/Analytics/bases.xlsx", sheet = "Planilha1")
+
+uso_system_fev21 <- inner_join(uso_system_fev21, bases, by = "Base")
+
+x <- cor(uso_system_fev21[7:21]) 
+
+y <- uso_system_fev21 %>% select(`Total de Acessos`, `Acessos por Dia`, `OS Abertas com Plano`,
+                                  `OS Abertas sem Plano`, `Usuários Distintos`, `OS Fechadas`,  `Procedimentos Ativos`, 
+                                  `Certificados Emitidos`, `Movimentações no Estoque`)
+```
+
+# AED
+
+#### Correlações
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+corrplot(x, type="upper", order="hclust")
+
+
+
+pairs.panels(y)
+
+
+
+```
+
+#### Visualização de dados
+
+Dispersão
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+uso_system_fev21   %>%
+  ggplot(aes(`OS Fechadas`, `Acessos por Dia`, color = TIPO,  size = `Certificados Emitidos`, shape = `Módulo de Clientes`)) +
+  geom_point() +
+  scale_y_log10("Acessos por dia log10") +
+  scale_x_log10("OS Fechadas log10") +
+  ggtitle("Acessos por Dia x OS Fechadas") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_grid(~VALOR)
+  
+
+
+```
+
+
+
+#### Bases < 100 OS Fechadas e <30 acessos diários
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+uso_system_fev21  %>% filter(TIPO %in% c("AT") & `OS Fechadas` <= 100 & `Acessos por Dia` < 30) %>%
+  ggplot(aes(`OS Fechadas`, `Usuários Distintos`, color = VALOR)) +
+  geom_point(size = 3) +
+  geom_label_repel(aes(label = Base), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  scale_y_log10("Acessos por dia log10") +
+  scale_x_log10("OS Fechadas log10") +
+  ggtitle("ATs Acessos por Dia por OS Fechadas < 100") +
+  facet_grid(~TIPO) 
+
+uso_system_fev21  %>% filter(TIPO %in% c( "EC") & `OS Fechadas` <= 100 & `Acessos por Dia` < 30) %>%
+  ggplot(aes(`OS Fechadas`, `Usuários Distintos`, color = VALOR)) +
+  geom_point(size = 3) +
+  geom_label_repel(aes(label = Base), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  scale_y_log10("Acessos por dia log10") +
+  scale_x_log10("OS Fechadas log10") +
+  ggtitle("ECs Acessos por Dia por OS Fechadas < 100") +
+  facet_grid(~TIPO) 
+
+uso_system_fev21  %>% filter(TIPO %in% c("H") & `OS Fechadas` <= 100 & `Acessos por Dia` < 30) %>%
+  ggplot(aes(`OS Fechadas`, `Usuários Distintos`, color = VALOR)) +
+  geom_point(size = 3) +
+  geom_label_repel(aes(label = Base), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  scale_y_log10("Acessos por dia log10") +
+  scale_x_log10("OS Fechadas log10") +
+  ggtitle("H Acessos por Dia por OS Fechadas < 100") +
+  facet_grid(~TIPO) 
+
+```
+ 
+
+ 
+### GRUPO DE RISCO A
+
+Bases com <= 1 acesso por dia e <= 5 OS Fechadas
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+uso_system_fev21 %>%  filter(`Acessos por Dia` <= 1 & `OS Fechadas` <= 5) %>% 
+  select(Base, TIPO, VALOR, KAM, `Acessos por Dia`, `OS Fechadas`) %>% 
+  arrange(`OS Fechadas`) %>% knitr::kable()
+
+```
+
+### GRUPO DE RISCO B1
+
+Bases sem uso deMovimentações no Estoque Certificados Emitidos, Contratos com Fornecedores, e Planos de Manutenção Ativos:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+uso_system_fev21 %>%  filter( `Movimentações no Estoque` <=1 & `Certificados Emitidos` <= 1 & 
+                                `Contratos com Fornecedores` <= 1 & `Planos de Manutenção Ativos` <= 1 &
+                                 `OS Fechadas` >= 2) %>% 
+  select(Base, TIPO, VALOR, KAM, `Certificados Emitidos`, `Planos de Manutenção Ativos`, `Contratos com Fornecedores`) %>% 
+  arrange(`Certificados Emitidos`) %>% knitr::kable()
+
+```
+### GRUPO DE RISCO B2
+
+Bases sem uso de Certificados Emitidos, Contratos com Clientes, Orçamentos Emitidos, e Planos de Manutenção Ativos:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+uso_system_fev21 %>%  filter(TIPO == "H" & `Certificados Emitidos` <= 1 & `Contratos com Clientes` <= 1 & `Orçamentos Emitidos` <= 1 &
+                                 `Planos de Manutenção Ativos` <= 1 & `OS Fechadas` >= 2) %>% 
+  select(Base, TIPO, VALOR, KAM, `Certificados Emitidos`, `Planos de Manutenção Ativos`, `Orçamentos Emitidos`, `Contratos com Clientes`) %>% 
+  arrange(`Certificados Emitidos`) %>% knitr::kable()
+
+```
+
+### GRUPO DE RISCO C
+
+Bases de clientes VIP, Grande e Conta Média sem  Certificados Emitidos e sem Contratos com Fornecedores:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+uso_system_fev21 %>%  filter(VALOR %in% c("VIP", "Grande", "Média") &  `Certificados Emitidos` <= 1 & 
+                                `Contratos com Fornecedores` <= 1 ) %>% 
+  select(Base, TIPO, KAM, `Certificados Emitidos`, `Contratos com Fornecedores`,) %>% 
+  arrange(`Certificados Emitidos`) %>% knitr::kable()
+
+```
+### GRUPO DE RISCO D
+
+Bases de clientes VIP, Grande e Conta Média sem  Movimentações no Estoque e sem Contratos com Fornecedores:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+a <- uso_system_fev21 %>%  filter(VALOR %in% c("VIP", "Grande", "Média") &  `Certificados Emitidos` <= 1 & 
+                                `Contratos com Fornecedores` <= 1 ) %>% select(Base)
+
+
+
+
+uso_system_fev21 %>%  filter(VALOR %in% c("VIP", "Grande", "Média") &  `Movimentações no Estoque` <= 1 & 
+                                `Contratos com Fornecedores` <= 1 ) %>% 
+  select(Base, TIPO, KAM, `Movimentações no Estoque`, `Contratos com Fornecedores`) %>% 
+  arrange(`Movimentações no Estoque`) %>% knitr::kable()
+
+
+```
