@@ -1,0 +1,528 @@
+  
+--- --- ---
+title: ""
+author: "Miguel Boto"
+date: "17/02/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(broom)
+library(patchwork)
+library(lubridate)
+library(data.table)
+library(caret)
+library(ggridges)
+library(xts)
+library(dygraphs)
+library(readr)
+library(openxlsx)
+library(readxl)
+library(ggthemes)
+library(ggrepel)
+library(RColorBrewer)
+library(rpart)
+library(cvms)
+library(tibble) 
+library(DAAG)
+library(party)
+library(rpart.plot)
+library(mlbench)
+library(pROC)
+library(tree)
+library(PerformanceAnalytics)
+library(psych)
+library(corrplot)
+
+theme_set(theme_bw())
+knitr::opts_chunk$set(echo = TRUE)
+
+bases <- bases <- read_excel("~/System/Relatórios gerenciais/Analytics/bases.xlsx", sheet = "Planilha2")
+
+labels <- read_excel("~/System/Relatórios gerenciais/Analytics/labels.xlsx")
+
+bases <- inner_join(bases, labels, by = "razaosocial")
+
+financeiro <- read_excel("~/System/Histórico Financeiro.xlsx")
+
+financeiro$datavencimento <- as.Date(financeiro$datavencimento, origin="1970-01-01")
+
+financeiro$datapgto <- as.Date(financeiro$datapgto, origin="1970-01-01")
+
+financeiro2 <- inner_join(financeiro, bases, by = "razaosocial")
+
+resume <- financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & 
+                                   dias_atraso >= 0 & datapgto >= "2018-01-01") %>%
+  group_by(razaosocial) %>% mutate(média_atraso = mean(dias_atraso), média_mensal = mean(valorcorrente)) %>%
+  group_by(média_atraso) %>%
+  filter(datapgto == max(datapgto)) %>%
+  arrange(desc(datapgto))
+
+hospitals <- financeiro2 %>% filter(TIPO == "H" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01")
+
+ATS <- financeiro2 %>% filter(TIPO == "AT" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01")
+
+ECs <- financeiro2 %>% filter(TIPO == "EC" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01")
+
+PR <- financeiro2 %>% filter(TIPO == "PR" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01")
+
+O <- financeiro2 %>% filter(TIPO == "O" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01")
+
+Fb <- financeiro2 %>% filter(TIPO == "F" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01")
+
+```
+
+## 1. Análise exploratória e visualização de dados
+
+* Média de atraso em dias e desvios padrão:
+
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+financeiro2 %>% group_by(TIPO) %>% filter(!is.na(datapgto) & dias_atraso >= 0) %>% 
+ summarise('Média atraso dias' = mean(dias_atraso), 'Standard deviation' = sd(dias_atraso)) %>%
+  knitr::kable()
+
+```
+ 
+
+ 
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01") %>%
+  group_by(razaosocial) %>% mutate(média_atraso = mean(dias_atraso)) %>%
+  ggplot(aes(dias_atraso)) +
+  geom_bar(stat="bin", fill="blue") +
+  ggtitle("Histograma global frequencia atraso por NFs")
+```
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+financeiro2  %>% group_by(razaosocial) %>% 
+  filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & datapgto >= 2018-01-01 & dias_atraso >= 0 ) %>%  
+  mutate(média_atraso = mean(dias_atraso), média_mensalidade = mean(valorcorrente)) %>%
+  ggplot(aes(TIPO, média_atraso)) +
+  scale_y_log10() +
+  geom_boxplot() +
+  geom_jitter(width = 0.1, alpha = 0.2) +
+  ylab("Média Dias Atraso 'escala log10'") +
+  ggtitle("Boxplot Média dias de atraso por NF, Tipo de cliente e Mercado")
+
+```
+
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & 
+                         datapgto >= "2018-01-01") %>%
+  group_by(razaosocial) %>% mutate(média_atraso = mean(dias_atraso)) %>% 
+  ggplot(aes(média_atraso)) +
+  stat_bin(bins=500) +
+  ggtitle("Frequencia de NFs em atraso")
+```
+
+
+
+```{r}
+
+A <- resume %>% filter(TIPO == "H") %>% mutate(label = reorder(label, média_atraso)) %>%
+  filter(média_atraso >= 3) %>%
+  ggplot(aes(média_atraso, label)) +
+  geom_bar(stat = "identity", fill = "brown") +
+  ggtitle("H")
+
+B <- resume %>% filter(TIPO == "AT") %>% mutate(label = reorder(label, média_atraso)) %>%
+    filter(média_atraso >= 3) %>%
+  ggplot(aes(média_atraso, label)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  ggtitle("ATs")
+
+C <- resume %>% filter(TIPO == "EC") %>% mutate(label = reorder(label, média_atraso)) %>%
+    filter(média_atraso >= 3) %>%
+  ggplot(aes(média_atraso, label)) +
+  geom_bar(stat = "identity", fill = "green") +
+  ggtitle("ECs")
+
+A + B + C 
+
+```
+
+## 2. Análise de correlações
+
+
+
+* Coeficientes gerais  de correlação de dias atraso por valor de mensalidade:
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+corr <- financeiro2  %>% group_by(TIPO) %>% filter( !is.na(datapgto) & datavencimento >= "2018-01-01" 
+                                           & dias_atraso >= 0 & datapgto >= "2018-01-01") %>% 
+ summarize(r = cor(dias_atraso, valorcorrente)) 
+
+pairs.panels(corr)
+
+```
+
+* Coeficientes gerais de correlação de dias atraso por mês de vencimento 
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+corr2 <- financeiro2  %>% group_by(TIPO) %>% filter( !is.na(datapgto) & datavencimento >= "2018-01-01" 
+                                           & dias_atraso >= 0 & datapgto >= "2018-01-01") %>% 
+ summarize(r = cor(dias_atraso, mes_vencimento)) 
+
+pairs.panels(corr2)
+
+```
+
+* Coeficientes de correlação de dias atraso por valor de mensalidade  em Hospitais e por valor de conta
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+corr3 <- financeiro2 %>% group_by(VALOR) %>% filter(TIPO == "H" & !is.na(datapgto) & datavencimento >= "2018-01-01" 
+                                           & dias_atraso >= 0 & datapgto >= "2018-01-01") %>% 
+ summarize(r = cor(dias_atraso, valorcorrente)) 
+
+pairs.panels(corr3)
+
+```
+
+* Coeficientes de correlação de dias atraso por valor de mensalidade  em ATs por valor de conta
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+corr4 <- financeiro2 %>% group_by(VALOR) %>% filter(TIPO == "AT" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & datapgto >= "2018-01-01") %>% 
+  summarize(r = cor(dias_atraso, valorcorrente)) 
+
+pairs.panels(corr4)
+
+```
+
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+financeiro2 %>% filter(!is.na(datapgto)  & datavencimento >= "2018-01-01" & datapgto >= "2018-01-01" &
+                         dias_atraso >= 0) %>%  
+  ggplot(aes(valorcorrente, dias_atraso, size = valorcorrente, color = TIPO)) +
+   geom_point() +
+   facet_grid(~TIPO) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("correlação atraso ~ valor da mensalidade por NFs")
+```
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+financeiro2 %>% group_by(razaosocial) %>% 
+  filter(!is.na(datapgto) & TIPO != "F"  & datavencimento >= "2018-01-01" & datapgto >= "2018-01-01" & dias_atraso >= 0) %>%  
+  mutate(média_atraso = mean(dias_atraso), média_mensalidade = mean(valorcorrente)) %>%
+  ggplot(aes(média_mensalidade, média_atraso, color = TIPO, size = média_mensalidade)) +
+  geom_point() +
+  facet_grid(~TIPO) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("correlação atraso médio ~ valor médio da mensalidade por clientes")
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+financeiro2 %>% group_by(razaosocial) %>% 
+  filter(!is.na(datapgto) & TIPO != "F"  & datavencimento >= "2018-01-01" & datapgto >= "2018-01-01" & dias_atraso >= 0) %>%  
+  mutate(média_atraso = mean(dias_atraso), média_mensalidade = mean(valorcorrente)) %>%
+  ggplot(aes(média_mensalidade, média_atraso, color = TIPO, size = média_mensalidade)) +
+  geom_point() +
+  facet_grid(~VALOR) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("correlação atraso médio ~ valor médio da mensalidade por valor de clientes ")
+```
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+fit <- lm(mes_vencimento ~ dias_atraso, data = hospitals)
+tidy(fit, conf.int = TRUE)
+
+fit_ATS <- lm(mes_vencimento ~ dias_atraso, data = ATS)
+tidy(fit_ATS, conf.int = TRUE)
+
+fit_ECs <- lm(mes_vencimento ~ dias_atraso, data = ECs)
+tidy(fit_ECs, conf.int = TRUE)
+
+hospitals %>%
+  group_by(mes_vencimento) %>%
+  do(tidy(lm(valorcorrente ~dias_atraso, data = .), conf.int = TRUE)) %>%
+filter(term == "dias_atraso") %>%
+  select(mes_vencimento, estimate, conf.low, conf.high) %>%
+  ggplot(aes(mes_vencimento, y = estimate, ymin = conf.low, ymax = conf.high)) +
+  geom_errorbar() +
+  geom_point() +
+  ggtitle("Hospitals Least Square Estimate")
+
+ATS %>%
+  group_by(mes_vencimento) %>%
+  do(tidy(lm(valorcorrente ~ dias_atraso, data = .), conf.int = TRUE)) %>%
+  filter(term == "dias_atraso") %>%
+  select(mes_vencimento, estimate, conf.low, conf.high) %>%
+  ggplot(aes(mes_vencimento, y = estimate, ymin = conf.low, ymax = conf.high)) +
+  geom_errorbar() +
+  geom_point() +
+  ggtitle("AT Least Square Estimate")
+
+ECs %>%
+  group_by(mes_vencimento) %>%
+  do(tidy(lm(valorcorrente ~dias_atraso, data = .), conf.int = TRUE)) %>%
+  filter(term == "dias_atraso") %>%
+  select(mes_vencimento, estimate, conf.low, conf.high) %>%
+  ggplot(aes(mes_vencimento, y = estimate, ymin = conf.low, ymax = conf.high)) +
+  geom_errorbar() +
+  geom_point() +
+  ggtitle("EC Least Square Estimate")
+```
+
+
+
+## 3. Análise de probabilidade
+
+### Arbores de regressão
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+x <- resume %>%  
+  mutate(valorcorrente = as.numeric(valorcorrente), dias_atraso = as.numeric(dias_atraso))  %>%  
+  filter(TIPO == "H" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & 
+           datapgto >= "2018-01-01") %>% 
+  filter(datapgto == max(datapgto)) %>%
+  select(média_atraso, valorcorrente) 
+
+
+fit <- rpart(valorcorrente ~ ., data = x)
+
+rpart.plot(fit)
+
+  
+```
+
+* Árbore de decisão: demora por valor da mensalidade em ATs
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+x <- resume %>%  
+  mutate(valorcorrente = as.numeric(valorcorrente), dias_atraso = as.numeric(dias_atraso))  %>%  
+  filter(TIPO == "AT" & pais == "BRA" & !is.na(datapgto) & datavencimento >= "2018-01-01" & dias_atraso >= 0 & 
+           datapgto >= "2018-01-01") %>% 
+  filter(datapgto == max(datapgto)) %>%
+  select(média_atraso, valorcorrente) 
+  
+
+fit <- rpart(valorcorrente ~ ., data = x)
+
+rpart.plot(fit) 
+```
+
+### Análise de Cluster
+
+
+![](C:/Users/miguellocal/Documents/System/Relatórios gerenciais/Analytics/Global_cluster_analisys_risk.jpg)
+
+![](C:/Users/miguellocal/Documents/System/Relatórios gerenciais/Analytics/H cluster analisys risk.jpg)
+
+![](C:/Users/miguellocal/Documents/System/Relatórios gerenciais/Analytics/AT cluster analisys risk.jpg)
+
+### RMSE
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# Validation: 10% of  Report data
+
+bases <- bases <- read_excel("~/System/Relatórios gerenciais/Analytics/bases.xlsx", sheet = "Planilha2")
+
+financeiro <- read_excel("~/System/Histórico Financeiro.xlsx")
+
+financeiro$datavencimento <- as.Date(financeiro$datavencimento, origin="1970-01-01")
+
+financeiro$datapgto <- as.Date(financeiro$datapgto, origin="1970-01-01")
+
+financeiro2 <- inner_join(financeiro, bases, by = "razaosocial")
+
+set.seed(1000, sample.kind="Rounding") # if using R 3.5 or earlier, use `set.seed(1)`
+
+financeiro2 <- financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & 
+                                   dias_atraso >= 0 & datapgto >= "2018-01-01" & TIPO == "H")
+
+test_index <- createDataPartition(y = financeiro2$dias_atraso, times = 1, p = 0.1, list = FALSE)
+test <- financeiro2[-test_index,]
+temp <- financeiro2[test_index,]
+
+
+
+validation <- temp %>% 
+  semi_join(test, by = "razaosocial") %>%
+  semi_join(test, by = "cnpj")
+
+removed <- anti_join(temp, validation)
+test <- rbind(test, removed)
+
+
+# Naive by Mean 
+
+mu <- mean(test$dias_atraso)
+naive_RMSE <- RMSE(temp$dias_atraso, mu) 
+
+RMSE_results = data.frame(Method = "Naive Model", RMSE = naive_RMSE) 
+RMSE_results
+
+# Bias Model
+
+avgs <- test %>% group_by(razaosocial) %>%
+  summarise(bias = mean(dias_atraso - mu))
+
+prediction <- mu + temp %>%
+  left_join(avgs, by="razaosocial") %>%
+  pull(bias)
+
+bias_effect_model <- RMSE(prediction, temp$dias_atraso)
+
+
+RMSE_results <-  bind_rows(RMSE_results, 
+                           data.frame(Method = "Bias Effect Model", 
+                                      RMSE = bias_effect_model))
+RMSE_results %>% knitr::kable()
+
+# VALOR model
+
+avgs_tipo <- test %>% group_by(VALOR) %>%
+  left_join(avgs, by = "razaosocial") %>%
+  summarise(tip = mean(dias_atraso - mu - bias))
+
+prediction2 <- temp %>%
+  left_join(avgs, by = "razaosocial") %>%
+  left_join(avgs_tipo, by = "VALOR") %>%
+  mutate(pred2 = mu + bias + tip) %>%
+  pull(tip)
+
+Tipo_effect_model <- RMSE(prediction2, temp$dias_atraso)
+
+RMSE_results <- bind_rows(RMSE_results, 
+                          data.frame(Method="Naive + Bias & Valor Effect Model", 
+                                     RMSE = Tipo_effect_model))
+
+RMSE_results %>% knitr::kable()
+
+
+# Regularização e Validação Cruzada
+
+lambdas <- seq(0, 10, 0.25)
+
+RMSES <- sapply(lambdas, function(l){
+  mu <- mean(test$dias_atraso)
+  bias <- test %>%
+    group_by(razaosocial) %>%
+    summarize(bias = sum(dias_atraso - mu)/(n()+l))
+  tip <- test %>%
+    left_join(bias, by="razaosocial") %>%
+    group_by(VALOR) %>%
+    summarize(tip = sum(dias_atraso - bias - mu)/(n()+l))
+  predicted_ratings <-
+    temp %>%
+    left_join(bias, by = "razaosocial") %>%
+    left_join(tip, by = "VALOR") %>%
+    mutate(pred = mu + bias + tip) %>%
+    pull(pred)
+  return(RMSE(predicted_ratings, temp$dias_atraso))
+})
+
+qplot(lambdas, RMSES)
+
+# Modelo Regularizado
+
+RMSE_results <- bind_rows(RMSE_results, 
+                          data.frame(Method="Regularized Model", 
+                                     RMSE = min(RMSES)))
+
+RMSE_results %>% knitr::kable()
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+bases <- bases <- read_excel("~/System/Relatórios gerenciais/Analytics/bases.xlsx", sheet = "Planilha2")
+
+financeiro <- read_excel("~/System/Histórico Financeiro.xlsx")
+
+financeiro$datavencimento <- as.Date(financeiro$datavencimento, origin="1970-01-01")
+
+financeiro$datapgto <- as.Date(financeiro$datapgto, origin="1970-01-01")
+
+financeiro2 <- inner_join(financeiro, bases, by = "razaosocial")
+
+set.seed(1000, sample.kind="Rounding") 
+
+
+financeiro2 <- financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & 
+                                        dias_atraso >= 0 & datapgto >= "2018-01-01" & TIPO != "O")
+
+
+financeiro2 <- financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & 
+                                        dias_atraso >= 0 & datapgto >= "2018-01-01" & TIPO != "EC")
+
+financeiro2 <- financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & 
+                                        dias_atraso >= 0 & datapgto >= "2018-01-01" & TIPO != "F")
+
+financeiro2 <- financeiro2 %>% filter(!is.na(datapgto) & datavencimento >= "2018-01-01" & 
+                                        dias_atraso >= 0 & datapgto >= "2018-01-01" & TIPO != "PR") %>%
+                              mutate(TIPO = as.factor(TIPO))
+
+
+y <- financeiro2$TIPO
+x <- financeiro2$dias_atraso
+
+test_index <- createDataPartition(y, times = 1, p = 0.1, list = FALSE)
+test_set <- financeiro2[test_index,]
+train_set <-  financeiro2[-test_index,]
+
+
+
+y_hat <- sample(c("H", "AT"), length(test_index), replace = TRUE)
+
+
+y_hat <- sample(c("H", "AT"), length(test_index), replace = TRUE) %>%
+  factor(levels = levels(test_set$TIPO))
+
+mean(y_hat == test_set$TIPO)
+
+financeiro2 %>% group_by(TIPO) %>% summarize(mean(dias_atraso), sd(dias_atraso))
+
+cutoff <- seq(5, 15)
+accuracy <- map_dbl(cutoff, function(x){
+  y_hat <- ifelse(train_set$dias_atraso > x, "H", "AT") %>%
+    factor(levels = levels(test_set$TIPO))
+  mean(y_hat == train_set$TIPO)
+})
+
+test_set %>%
+  mutate(y_hat = y_hat) %>%
+  group_by(TIPO) %>%
+  summarize(accuracy = mean(y_hat == TIPO))
+
+plot(accuracy)
+
+
+```
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+t <- table(predicted = y_hat, actual = test_set$TIPO)
+
+t <- tidy(t)
+
+
+plot_confusion_matrix(t, 
+                      target_col = "actual", 
+                      prediction_col = "predicted",
+                      counts_col = "n")
