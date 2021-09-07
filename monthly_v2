@@ -1,0 +1,453 @@
+---
+title: ""
+author: "Miguel Boto"
+date: "01/9/2021"
+output:  
+  prettydoc::html_pretty:
+    theme: leonids
+    
+
+
+---
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+library(tidyverse)
+library(data.table)
+library(lubridate)
+library(readxl)
+library(readr)
+library(openxlsx)
+library(patchwork)
+library(ggthemes)
+library(ggrepel)
+library(RColorBrewer)
+library(rpart)
+library(cvms)
+library(tibble) 
+library(psych)
+library(PerformanceAnalytics)
+library(corrplot)
+library(plotly)
+library(quantmod)
+library(prettydoc)
+library(rmdformats)
+library(janitor)
+library(broom)
+library(data.table)
+library(caret)
+library(ggridges)
+library(xts)
+library(dygraphs)
+library(data.table)
+library(Rcpp)
+library(rstan)
+library(StanHeaders)
+library(prophet)
+
+
+
+theme_set(theme_bw())
+
+
+resultados_jan_2021 <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/resultados_jan_2021.xlsx", 
+    col_types = c("date", "text", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric"))
+
+resultados_jan_2021 <- resultados_jan_2021%>% mutate(`Taxa Fechamento` = `Taxa Fechamento` * 100)
+
+resultados_jan_2021$data <- as.Date(resultados_jan_2021$data, origin = "1899-12-30")
+
+Faturamento_por_venda <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Faturamento por venda.xls", sheet = "2021",
+                                    col_types = c("text", "text", "text", "text", "numeric", "numeric", 
+                                                  "numeric", "text", "text", "text"))
+
+
+
+nc_e_ups <- read_delim("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Analytics/nc_e_ups.csv", 
+    delim = ";", escape_double = FALSE, col_types = cols(close_date = col_date(format = "%d/%m/%Y"), 
+        open_date = col_datetime(format = "%d/%m/%Y")), 
+    trim_ws = TRUE)
+
+up_sales_report <- nc_e_ups %>% filter(sale_class == "upselling") %>% mutate(open_date = as.Date(open_date, origin = "1899-12-30"), 
+                                         close_date = as.Date(close_date, origin = "1899-12-30"), 
+                                         time = close_date - open_date)
+
+nc_ups_sales_report <- nc_e_ups %>% mutate(open_date = as.Date(open_date, origin = "1899-12-30"), 
+                                         close_date = as.Date(close_date, origin = "1899-12-30"), 
+                                         time = close_date - open_date)
+
+meta <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Pasta2.xlsx")
+
+
+
+metas <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/metas.xlsx", 
+    col_types = c("text", "text", "text", 
+        "text"))
+
+
+
+
+
+sales_report <- nc_e_ups %>% filter(sale_class != "upselling") %>% mutate(open_date = as.Date(open_date, origin = "1899-12-30"), 
+                                close_date = as.Date(close_date, origin = "1899-12-30"), time = close_date - open_date)
+
+
+
+Pasta3 <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Pasta3.xlsx")
+
+Pasta4 <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Pasta4.xlsx")
+
+
+ads_concorrentes <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Analytics/ads_concorrentes.xlsx", 
+    col_types = c("text", "text", "date", 
+        "numeric", "numeric", "numeric"))
+
+open <- sales_report %>% filter(status == "Open")
+
+perdidas <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Analytics/perdidas.xlsx", 
+    col_types = c("text", "numeric", "text", 
+        "date", "date", "text", "text"))
+
+impress <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Analytics/impress.xlsx", 
+    col_types = c("date", "numeric", "numeric", 
+        "numeric", "numeric"))
+
+
+O <- nc_e_ups %>% filter(origin == "prospect") %>% group_by(month = lubridate::floor_date(open_date, "month")) %>%  filter(month >= "2018-01-01") %>% count(opportunity_ID) %>% summarize(total_ops = sum(n))
+
+P <- impress %>% group_by(month = lubridate::floor_date(Data, "month")) %>% filter(month <= "2021-03-01") %>%
+    summarize(total_impress = sum(Impressões), total_cliques = sum(Cliques), taxa = total_cliques/total_impress)
+
+OOPP <- inner_join(O, P, by = "month")
+
+
+indicadores_globais_vendas_e_faturamento <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/indicadores_globais_vendas_e_faturamento.xlsx", 
+    col_types = c("numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric"))
+
+
+indicadores_globais <- indicadores_globais_vendas_e_faturamento %>% mutate(manutenções_NC_sobre_total = manutenções_NC_sobre_total * 100, taxa_fechamento = taxa_fechamento * 100, taxa_perdidas_vs_abertas_NC = taxa_perdidas_vs_abertas_NC * 100, consecução_meta_manutenções = consecução_meta_manutenções * 100, consecução_meta_receita = consecução_meta_receita * 100)
+
+indicadores_globais_mensal <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/indicadores_globais_vendas_e_faturamento.xlsx", sheet = "Planilha2", 
+    col_types = c("numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric"))
+
+receita <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/indicadores_globais_vendas_e_faturamento.xlsx", 
+                      sheet = "Planilha3", col_types = c("date", "numeric", "numeric", 
+        "text", "text"))
+
+receita$Mês <- as.Date(receita$Mês, origin = "1899-12-30")
+
+
+
+faturamento_por_cliente <- read_excel("C:/Users/miguellocal/Documents/~/Relatórios gerenciais/Analytics/faturamento_por_cliente.xlsx", 
+    col_types = c("text", "text", "text", 
+        "text", "text", "text", "numeric", 
+        "text", "numeric"))
+
+corr <- resultados_jan_2021  %>% filter(data >= "2019-01-01") %>% select( `Prospectos Org.`, `Ops Abertas`, `Ticket M. Abertas`, `Valor Abertas`, `Op Ganhas`, `Ticket M. Ganhas`, `Valor Ganhas`, `Taxa Fechamento`, pesquisas, receita, `Op Ganhas_ups`,	`Valor Ganhas_ups`)
+
+
+
+pred <- resultados_jan_2021 %>% filter(!is.na(data))
+
+pred$data <- as.Date(pred$data, origin="1970-01-01")
+
+
+
+
+ds <- pred$data
+y <-  pred$receita
+df <- data.frame(ds, y)
+
+
+
+m <- prophet(df)
+
+future <- make_future_dataframe(m, periods = 12, freq = "month")
+
+forecast <- predict(m, future)
+
+```
+
+
+```{r, echo=FALSE}
+htmltools::img(src = knitr::image_uri(file.path(R.home("doc"), "html", "~.jpg")), 
+               alt = '~', 
+               style = 'position:absolute; top:0; right:0; padding:10px;')
+```
+
+
+### Evolução 2021
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+label <-c("jan 21", "fev 21", "mar 21", "abr 21", "mai 21", "jun 21", "jul 21", "ag 21", "med 21", "med 20", "med 19")
+
+
+resultados_jan_2021 %>% filter(Label %in% label) %>% select(Label, `Prospectos Org.`, `Ticket M. Abertas`, `Ops Abertas`, `Valor Abertas`, `Op Ganhas`, `Valor Ganhas`, `Ticket M. Ganhas`)  %>% mutate(across(is.numeric, ~ round(., 1))) %>% knitr::kable()
+
+
+
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+label <-c("jan 21", "fev 21", "mar 21", "abr 21", "mai 21", "jun 21", "jul 21", "ag 21", "med 21", "med 20", "med 19", "med 18")
+
+ resultados_jan_2021 %>% filter(Label %in% label) %>% 
+  ggplot(aes(`Ops Abertas`, `Ticket M. Abertas`, label = Label)) +
+  geom_point(aes(size = `Ticket M. Abertas`), alpha = 0.3, color = "blue4") +
+  scale_size(range = c(3, 15)) + 
+  geom_label_repel(aes(label = Label), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  ggtitle("Ticket Médio e nº de ops. abertas NC")
+
+ resultados_jan_2021 %>% filter(Label %in% label) %>% 
+  ggplot(aes(`Op Ganhas`, `Valor Ganhas`, label = Label)) +
+   geom_point(aes(size = `Valor Ganhas`), alpha = 0.3, color = "purple") +
+    scale_size(range = c(3, 15)) + 
+   geom_label_repel(aes(label = Label), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  ggtitle("Acumulado mensal Ops. ganhas NC 2021")
+ 
+```
+
+```{r echo=FALSE}
+Faturamento_por_venda %>% filter(Mes == "Agosto" & TIPO == "Nova Conta") %>% 
+  select(Nome_da_Conta, Mercado, Manut) %>% rename('Novo Cliente' = Nome_da_Conta, 'Manutenção Anual' = Manut) %>% knitr::kable()
+
+```
+
+```{r echo=FALSE}
+cor <- cor(corr[1:12]) 
+
+pairs.panels(cor, main = "Coeficientes de correlação (dados > 2018)")
+
+
+ TM <- with(resultados_jan_2021, `Ticket M. Ganhas`)
+ hist(TM, main = "Frequência dos TM de Op Ganhas (2018-2021)")
+```
+
+
+
+### Status meta NC do terceiro trimestre
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+meta %>% knitr::kable()
+
+
+
+
+```
+
+
+### Status meta anual de novas manutenções e upselling
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+metas %>% knitr::kable()
+
+```
+
+### Serie temporal anual: médias mensais
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+indicadores_globais_mensal %>%  filter(ano >= 2015) %>% mutate(média_manut = novas_manutenções_NC, média_mensal_op_NC_ganhas = op_ganhas_NC, média_mensal_OP_abertas = Op_abertas_NC, op_ganhas_NC_mensais = op_ganhas_NC/12, op_abertas_NC_mensais = Op_abertas_NC/12) %>%
+  ggplot(aes(média_manut, média_mensal_op_NC_ganhas, label = ano)) +
+   geom_point(aes(size = média_manut), alpha = 0.3, color = "orangered4") +
+    scale_size(range = c(3, 15)) + 
+   geom_label_repel(aes(label = ano), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+    ggtitle("Valor Man. e Op. ganhas")
+
+indicadores_globais_mensal %>%  filter(ano >= 2015) %>% mutate(média_mensal_op_NC_ganhas = op_ganhas_NC, média_mensal_op_abertas = Op_abertas_NC) %>%
+  mutate(valor_abertas = (Op_abertas_NC * ticket_médio_NC)/12) %>%
+  ggplot(aes(valor_abertas, média_mensal_op_abertas, label = ano)) +
+   geom_point(aes(size = valor_abertas), alpha = 0.3, color = "slategray4") +
+    scale_size(range = c(3, 15)) + 
+   geom_label_repel(aes(label = ano), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+    ggtitle("NC: médias OP abertas")
+
+
+a <- indicadores_globais_mensal %>% filter(ano >= 2018) %>% ggplot(aes(ano, total_novas_manutenções, fill = total_novas_manutenções))  +
+  geom_bar(stat="identity", alpha = 0.7) +
+  geom_point(aes(ano, média_acumulado_receita, size = média_acumulado_receita), alpha = 0.5, color = "palegreen3") +
+  scale_size(range = c(3, 12)) +
+  ggtitle("Média Mensal de Receita e Novas Manutenções")
+
+a + scale_fill_gradient(low = "slategray1", high = "slategray4")
+
+
+
+receita %>% filter(Mês >= "2017-07-01") %>% ggplot(aes(Mês, Receita)) +
+  geom_line() + 
+  geom_point(aes(size = Receita), alpha = 0.3, color = "orange") +
+    scale_size(range = c(3, 10)) +
+  geom_smooth(method = "lm")
+
+receita %>% filter(Mês >= "2021-01-01" & Mês <= "2021-08-01") %>% adorn_totals("row") %>% knitr::kable()
+
+```
+
+### Forecast Receita
+
+*Baseado no procedimento de previsão de dados "Prophet".
+Taylor SJ, Letham B. 2017. Forecasting at scale. https://doi.org/10.7287/peerj.preprints.3190v2
+
+
+```{r echo=FALSE}
+plot(m, forecast)
+prophet_plot_components(m, forecast)
+```
+
+```{r echo=FALSE}
+forecast %>% filter(ds >= "2021-08-01" & ds <= "2021-12-02") %>% select(ds, yhat) %>% knitr::kable()
+
+```
+
+
+### Análise oportunidades abertas e ganhas em 2021
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+sales_report %>% filter(open_date >= "2021-01-01") %>% group_by(market_class) %>% summarise(Oportunidades = n(), Value = sum(price)) %>%
+  ggplot(aes(Oportunidades, Value, color = market_class, label = market_class)) +
+  geom_point(aes(size = Value, color = market_class), alpha = 0.5) +
+  scale_size(range = c(3, 10)) + 
+   geom_label_repel(aes(label = market_class), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  ggtitle("Abertas em 2021")
+
+sales_report %>% filter(close_date >= "2021-01-01" & status == "Closed Won") %>% group_by(market_class) %>% summarise(Oportunidades = n(), Value = sum(price)) %>%
+  ggplot(aes(Oportunidades, Value, color = market_class, label = market_class)) +
+  geom_point(aes(size = Value, color = market_class), alpha = 0.5) +
+  scale_size(range = c(3, 10)) + 
+   geom_label_repel(aes(label = market_class), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  ggtitle("Ganhas em 2021")
+
+
+
+
+nc_e_ups %>% filter(origin == "prospect" & open_date >= "2018-01-01")  %>% group_by(status, month = lubridate::floor_date(open_date, "month")) %>% count(opportunity_ID) %>% summarize(total_ops = sum(n)) %>% ggplot(aes(month, total_ops, fill = status)) + geom_bar(stat = "identity") +
+scale_fill_hue(c = 40) +
+ggtitle("Status Op. NC por data de abertura")
+
+
+
+ perdidas %>% group_by(competitor) %>% ggplot(aes(competitor, fill = reason)) +
+  geom_bar(alpha = 0.4) +
+  ggtitle("Acumulado Oportunidades perdidas")
+ 
+
+```
+
+
+
+### Prospectos orgánicos: site + direct, Jan-Jun, 2020 vs 2021
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+Pasta3 %>% knitr::kable()
+
+resultados_jan_2021 %>% filter(data <= "2021-08-31") %>% ggplot(aes(data, `Prospectos Org.`)) +
+  geom_line() + 
+  geom_point(aes(size = `Prospectos Org.`), alpha = 0.3, color = "blue") +
+    scale_size(range = c(3, 10)) +
+  geom_smooth(method = "lm") +
+  ggtitle("Prospectos Org.")
+
+ads_concorrentes %>% filter(marca == "neo") %>% ggplot(aes(data, pesquisas)) +
+    geom_line() +
+  geom_point(aes(size = pesquisas), alpha = 0.3, color = "green") +
+    scale_size(range = c(3, 10)) +
+  geom_smooth(method = "lm") +
+  ggtitle("Pesquisas ~")
+
+```
+
+
+### Forecast prospectos orgánicos
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+prospects <- resultados_jan_2021 %>% filter(data <= "2021-08-31") %>% select(data, `Prospectos Org.`)
+
+prospects$data <- as.Date(prospects$data, origin="1970-01-01")
+
+
+
+ds <- prospects$data
+y <- prospects$`Prospectos Org.`
+df <- data.frame(ds, y)
+
+
+m <- prophet(df)
+
+
+future <- make_future_dataframe(m, periods = 12, freq = "month")
+
+forecast <- predict(m, future)
+
+
+plot(m, forecast)
+prophet_plot_components(m, forecast)
+```
+
+```{r echo=FALSE}
+forecast %>% filter(ds >= "2021-08-01" & ds <= "2021-12-02") %>% select(ds, yhat) %>% knitr::kable()
+```
+
+  
+
+### Pesquisas de Marca 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+
+
+ads_concorrentes %>%  filter(data >= "2021-01-01") %>% ggplot(aes(marca, pesquisas, color = marca )) + 
+  geom_boxplot(outlier.colour = "red", outlier.shape = 1) +
+  ggtitle("Acumulado 2021")
+
+ads_concorrentes  %>% ggplot(aes(marca, pesquisas, color = marca )) + 
+  geom_boxplot(outlier.colour = "red", outlier.shape = 1) +
+  ggtitle("Acumulado 2018-2021")
+  
+
+
+```
+
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+
+ads_concorrentes %>% filter(data >= "2018-03-01") %>% ggplot(aes(data, pesquisas, color = marca )) +
+    geom_line() +
+  ggtitle("Serie temporal")
+
+ads_concorrentes %>% filter(data > "2021-06-01") %>% 
+  ggplot(aes(taxa, pesquisas, color = marca, label = marca )) +  
+  xlab("taxa") +  geom_point(aes(size = pesquisas), alpha = 0.3) +
+    scale_size(range = c(2, 15)) + 
+  geom_label_repel(aes(label = marca), box.padding = 0.35, point.padding = 0.5, segment.color = 'grey50') +
+  ggtitle("Pesquisas e taxa mensal")
+
+```
